@@ -1,4 +1,4 @@
-# --- CONFIGURACIÓN OgKushh Vip ---
+# --- CONFIGURACIÓN OgKushh VIP ---
 try { Set-PSReadLineOption -HistorySaveStyle SaveNothing -ErrorAction SilentlyContinue } catch {}
 if ($host.Runspace.ApartmentState -ne "STA") {
     powershell -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCommandPath
@@ -19,6 +19,11 @@ public class API {
 "@
 Add-Type -TypeDefinition $api
 
+# --- OBJETOS DE FUENTE (Sin errores de units) ---
+$fontT = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+$fontS = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+$fontP = New-Object System.Drawing.Font("Consolas", 8, [System.Drawing.FontStyle]::Bold)
+
 # --- VARIABLES ---
 $script:LeftBind = 0
 $script:LActive = $false
@@ -28,81 +33,83 @@ $script:sw = [System.Diagnostics.Stopwatch]::StartNew()
 $script:lisL = $false
 $script:rand = New-Object System.Random
 
-# --- FUENTES CORREGIDAS (Evita errores de conversión) ---
-$fontTitle = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-$fontStatus = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-$fontSmall = New-Object System.Drawing.Font("Consolas", 7)
-
 function IsDown($k) { return ($k -ne 0 -and ([API]::GetAsyncKeyState($k) -band 0x8000)) }
 function GetName($k) {
     $n = @{0="NONE"; 1="LMB"; 2="RMB"; 4="MMB"; 16="SHIFT"; 17="CTRL"; 18="ALT"}
-    65..90|%{$n[$_]=[char]$_}
+    65..90 | ForEach-Object { $n[$_] = [char]$_ }
     if ($n.ContainsKey($k)) { return $n[$k] } else { return "K$k" }
 }
 
 # --- INTERFAZ ---
 $f = New-Object System.Windows.Forms.Form
-$f.Text = "OgKushh Vip"; $f.Size = "380,420"; $f.BackColor = "5,15,5"
+$f.Text = "OgKushh VIP V13"; $f.Size = "400,520"; $f.BackColor = "5,10,5"
 $f.FormBorderStyle = 'None'; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
 $f.Add_MouseDown({ [API]::ReleaseCapture(); [API]::SendMessage($f.Handle, 0xA1, 0x2, 0) })
+[API]::SetWindowDisplayAffinity($f.Handle, 0x11) # Invisible en Stream
 
-# Invisibility (Stream Proof)
-[API]::SetWindowDisplayAffinity($f.Handle, 0x11)
-
-# Planta de Marihuana Pixel Art
+# Planta ASCII
 $plant = New-Object System.Windows.Forms.Label
 $plant.Text = "      W`n     WWW`n    WWWWW`n   WWWWWWW`n      I`n      I"
-$plant.ForeColor = "LimeGreen"; $plant.Font = $fontSmall; $plant.Location = "290,15"; $plant.AutoSize=$true; $f.Controls.Add($plant)
+$plant.ForeColor = "LimeGreen"; $plant.Font = $fontP; $plant.Location = "300,15"; $plant.AutoSize=$true; $f.Controls.Add($plant)
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text = "OgKushh VIP"; $title.ForeColor = "Lime"; $title.Font = $fontTitle; $title.Location = "20,15"; $title.AutoSize=$true; $f.Controls.Add($title)
+$title.Text = "OgKushh VIP | V13"; $title.ForeColor = "Lime"; $title.Font = $fontT; $title.Location = "20,20"; $title.AutoSize=$true; $f.Controls.Add($title)
 
 $close = New-Object System.Windows.Forms.Label
-$close.Text = "×"; $close.Font = $fontTitle; $close.ForeColor = "DarkGreen"; $close.Location = "350,5"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
+$close.Text = "×"; $close.Font = $fontT; $close.ForeColor = "DarkGreen"; $close.Location = "370,10"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
 
-# BOTÓN DE ESTADO (Visual Indicador)
+# Indicador de Estado
 $btnStatus = New-Object System.Windows.Forms.Button
-$btnStatus.Text = "DESACTIVADO"; $btnStatus.BackColor = "DarkRed"; $btnStatus.ForeColor = "White"
-$btnStatus.FlatStyle = "Flat"; $btnStatus.Location = "25,70"; $btnStatus.Size = "330,45"
-$btnStatus.Font = $fontStatus; $btnStatus.Enabled = $false # Solo visual
+$btnStatus.Text = "SISTEMA: APAGADO"; $btnStatus.BackColor = "DarkRed"; $btnStatus.ForeColor = "White"
+$btnStatus.FlatStyle = "Flat"; $btnStatus.Location = "25,85"; $btnStatus.Size = "350,50"; $btnStatus.Font = $fontS; $btnStatus.Enabled = $false
 $f.Controls.Add($btnStatus)
 
-# Configuración CPS y Tecla
+# Configuración Principal
 $btnBind = New-Object System.Windows.Forms.Button
-$btnBind.Text = "BINDEAR TECLA"; $btnBind.BackColor = "10,30,10"; $btnBind.ForeColor = "Lime"; $btnBind.FlatStyle = "Flat"; $btnBind.Location = "25,135"; $btnBind.Size = "150,30"
+$btnBind.Text = "TECLA: ASIGNAR"; $btnBind.BackColor = "10,30,10"; $btnBind.ForeColor = "Lime"; $btnBind.FlatStyle = "Flat"; $btnBind.Location = "25,150"; $btnBind.Size = "160,35"
 $btnBind.Add_Click({ $btnBind.Text="..."; $script:lisL=$true })
 $f.Controls.Add($btnBind)
 
 $lCps = New-Object System.Windows.Forms.Label
-$lCps.Text = "CPS:"; $lCps.ForeColor = "White"; $lCps.Location = "200,140"; $lCps.AutoSize=$true; $f.Controls.Add($lCps)
+$lCps.Text = "CPS:"; $lCps.ForeColor = "White"; $lCps.Location = "210,158"; $lCps.AutoSize=$true; $f.Controls.Add($lCps)
 $inp = New-Object System.Windows.Forms.TextBox
-$inp.Text = "16"; $inp.BackColor = "5,10,5"; $inp.ForeColor = "Lime"; $inp.BorderStyle = "FixedSingle"; $inp.Size = "60,30"; $inp.Location = "240,137"; $inp.TextAlign = "Center"; $f.Controls.Add($inp)
+$inp.Text = "16"; $inp.BackColor = "5,10,5"; $inp.ForeColor = "Lime"; $inp.BorderStyle = "FixedSingle"; $inp.Size = "70,30"; $inp.Location = "250,155"; $inp.TextAlign = "Center"; $f.Controls.Add($inp)
 
-# Modos (Jitter / Butterfly)
+# PANEL DE MODOS
 $grp = New-Object System.Windows.Forms.GroupBox
-$grp.Text = "MODOS DE CLICK"; $grp.ForeColor = "Lime"; $grp.Location = "25,190"; $grp.Size = "330,80"
+$grp.Text = "MODOS ESPECIALES"; $grp.ForeColor = "Lime"; $grp.Location = "25,210"; $grp.Size = "350,140"
 $f.Controls.Add($grp)
+
 $rNormal = New-Object System.Windows.Forms.RadioButton
-$rNormal.Text = "Normal"; $rNormal.Checked = $true; $rNormal.Location = "15,30"; $rNormal.ForeColor = "White"; $grp.Controls.Add($rNormal)
+$rNormal.Text = "Normal (Estable)"; $rNormal.Checked = $true; $rNormal.Location = "20,30"; $rNormal.ForeColor = "White"; $rNormal.Size = "200,20"; $grp.Controls.Add($rNormal)
+
 $rJitter = New-Object System.Windows.Forms.RadioButton
-$rJitter.Text = "Jitter"; $rJitter.Location = "110,30"; $rJitter.ForeColor = "White"; $grp.Controls.Add($rJitter)
+$rJitter.Text = "Jitter (Temblor/Recoil)"; $rJitter.Location = "20,55"; $rJitter.ForeColor = "White"; $rJitter.Size = "200,20"; $grp.Controls.Add($rJitter)
+
 $rButter = New-Object System.Windows.Forms.RadioButton
-$rButter.Text = "Butterfly"; $rButter.Location = "210,30"; $rButter.ForeColor = "White"; $grp.Controls.Add($rButter)
+$rButter.Text = "Butterfly (Doble Click)"; $rButter.Location = "20,80"; $rButter.ForeColor = "White"; $rButter.Size = "200,20"; $grp.Controls.Add($rButter)
+
+$rDrag = New-Object System.Windows.Forms.RadioButton
+$rDrag.Text = "Drag (High Speed)"; $rDrag.Location = "20,105"; $rDrag.ForeColor = "White"; $rDrag.Size = "200,20"; $grp.Controls.Add($rDrag)
 
 # Footer
 $discord = New-Object System.Windows.Forms.Label
-$discord.Text = "discord.gg/ogkushh"; $discord.ForeColor = "DarkGreen"; $discord.Location = "125,385"; $discord.AutoSize=$true; $f.Controls.Add($discord)
+$discord.Text = "discord.gg/ogkushh"; $discord.ForeColor = "DarkGreen"; $discord.Location = "135,485"; $discord.AutoSize=$true; $f.Controls.Add($discord)
 
 $btnSD = New-Object System.Windows.Forms.Button
-$btnSD.Text = "SELF DESTRUCT (LIMPIAR)"; $btnSD.BackColor = "20,50,20"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "25,330"; $btnSD.Size = "330,40"
+$btnSD.Text = "SELF DESTRUCT (BYPASS)"; $btnSD.BackColor = "20,40,20"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "25,430"; $btnSD.Size = "350,45"
 $btnSD.Add_Click({ $f.Close() }); $f.Controls.Add($btnSD)
 
-# --- LÓGICA DE FUNCIONAMIENTO ---
+# --- LÓGICA CORE ---
 $timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 1
 $timer.Add_Tick({
     $now = $script:sw.ElapsedMilliseconds
     
-    # Detección de Tecla para Bind
+    # Parpadeo de Planta si está Activo
+    if($script:LActive){
+        if(($now % 1000) -gt 500){ $plant.ForeColor = "Lime" } else { $plant.ForeColor = "DarkGreen" }
+    } else { $plant.ForeColor = "LimeGreen" }
+
     if($script:lisL){
         for($i=1; $i -le 165; $i++){
             if(IsDown $i){
@@ -114,42 +121,39 @@ $timer.Add_Tick({
     }
 
     if($script:LeftBind -ne 0){
-        # ACTIVAR con tecla configurada
         if(IsDown $script:LeftBind){
             if(-not $script:LActive){
                 $script:LActive = $true
-                $btnStatus.Text = "ACTIVADO (LISTO)"
-                $btnStatus.BackColor = "LimeGreen"
+                $btnStatus.Text = "SISTEMA: ACTIVADO"; $btnStatus.BackColor = "LimeGreen"
                 [System.Threading.Thread]::Sleep(200)
             }
         }
 
-        # DETENER al hacer clic manual (LMB = 1)
         if($script:LActive -and (IsDown 1)){
             if(-not $script:IgnoreL){
                 $script:LActive = $false
-                $btnStatus.Text = "DESACTIVADO"
-                $btnStatus.BackColor = "DarkRed"
+                $btnStatus.Text = "SISTEMA: DETENIDO"; $btnStatus.BackColor = "DarkRed"
             }
         }
 
         if($script:LActive){
             $cps = 16
             [double]::TryParse($inp.Text, [ref]$cps) | Out-Null
-            $delay = 1000 / $cps
             
-            # Aplicar variaciones de modo
-            if($rJitter.Checked){ $delay += $script:rand.Next(-4, 4) }
-            if($rButter.Checked){ if($script:rand.Next(0,10) -gt 6){ $delay = 8 } }
+            $ms = 1000 / $cps
+            
+            # Lógica de Modos
+            if($rJitter.Checked){ 
+                $ms += $script:rand.Next(-5, 5) 
+                [API]::mouse_event(0x0001, $script:rand.Next(-1,2), $script:rand.Next(-1,2), 0, 0)
+            }
+            if($rButter.Checked){ if($script:rand.Next(0,10) -gt 7){ $ms = 5 } }
+            if($rDrag.Checked){ $ms = $ms * 0.8 } # Aumenta velocidad real
 
-            if($now - $script:lLast -ge $delay){
+            if($now - $script:lLast -ge $ms){
                 $script:IgnoreL = $true
-                [API]::mouse_event(0x0002, 0, 0, 0, 0) # Down
-                [API]::mouse_event(0x0004, 0, 0, 0, 0) # Up
-                
-                # Movimiento Jitter
-                if($rJitter.Checked){ [API]::mouse_event(0x0001, $script:rand.Next(-1,2), $script:rand.Next(-1,2), 0, 0) }
-                
+                [API]::mouse_event(0x0002, 0, 0, 0, 0)
+                [API]::mouse_event(0x0004, 0, 0, 0, 0)
                 $script:lLast = $now
             }
         }
