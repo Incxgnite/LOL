@@ -1,4 +1,10 @@
-# --- CONFIGURACIÓN DE ENTRADA ---
+# --- CONFIGURACIÓN ---
+try { Set-PSReadLineOption -HistorySaveStyle SaveNothing -ErrorAction SilentlyContinue } catch {}
+if ($host.Runspace.ApartmentState -ne "STA") {
+    powershell -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCommandPath
+    exit
+}
+
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $api = @"
 using System;
@@ -12,76 +18,61 @@ public class API {
 "@
 Add-Type -TypeDefinition $api
 
-# --- INTERFAZ ESTILO PANEL ---
+# --- VARIABLES ---
+$script:lLast = 0
+$script:sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+# --- INTERFAZ ---
 $f = New-Object System.Windows.Forms.Form
-$f.Text = "HeraMC Panel"; $f.Size = "360,380"; $f.BackColor = [System.Drawing.Color]::FromArgb(15,15,15)
+$f.Text = "HeraMC | Only Left"; $f.Size = "320,240"; $f.BackColor = "10,10,10"
 $f.FormBorderStyle = 'None'; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
 $f.Add_MouseDown({ [API]::ReleaseCapture(); [API]::SendMessage($f.Handle, 0xA1, 0x2, 0) })
 
-# Título
 $title = New-Object System.Windows.Forms.Label
-$title.Text = "HERA MC | CLICKER PANEL"; $title.ForeColor = "Cyan"; $title.Font = "Segoe UI,13,Bold"; $title.Location = "20,15"; $title.AutoSize=$true; $f.Controls.Add($title)
+$title.Text = "HERA CLICKER V9"; $title.ForeColor = "Cyan"; $title.Font = "Segoe UI,12,Bold"; $title.Location = "20,15"; $title.AutoSize=$true; $f.Controls.Add($title)
 
-# Botón Cerrar
 $close = New-Object System.Windows.Forms.Label
-$close.Text = "×"; $close.Font = "Arial,22,Bold"; $close.ForeColor = "DimGray"; $close.Location = "320,10"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
+$close.Text = "×"; $close.Font = "Arial,20,Bold"; $close.ForeColor = "Gray"; $close.Location = "285,10"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
 
-function CrearFila($txt, $y, $def) {
-    $p = New-Object System.Windows.Forms.Panel
-    $p.Size = "320,70"; $p.Location = "20,$y"; $p.BackColor = [System.Drawing.Color]::FromArgb(25,25,25)
-    
-    $l = New-Object System.Windows.Forms.Label
-    $l.Text = $txt; $l.ForeColor = "White"; $l.Location = "10,10"; $l.AutoSize=$true; $p.Controls.Add($l)
-    
-    $i = New-Object System.Windows.Forms.TextBox
-    $i.Text = $def; $i.Location = "10,35"; $i.Size = "60,25"; $i.BackColor = "10,10,10"; $i.ForeColor = "Cyan"; $i.BorderStyle = "FixedSingle"; $p.Controls.Add($i)
-    
-    $f.Controls.Add($p)
-    return $i
-}
+# Fila Única: Click Izquierdo
+$label = New-Object System.Windows.Forms.Label
+$label.Text = "COMBAT CPS (Mantén presionado)"; $label.ForeColor = "White"; $label.Location = "25,65"; $label.AutoSize=$true; $f.Controls.Add($label)
 
-$L_CPS = CrearFila "COMBAT CPS (Mantener LMB)" 60 "14"
-$R_CPS = CrearFila "BRIDGE CPS (Mantener RMB)" 140 "20"
-
-# Botón de Prueba
-$btnTest = New-Object System.Windows.Forms.Button
-$btnTest.Text = "PROBAR CLICK (Haz clic aquí)"; $btnTest.Size = "320,40"; $btnTest.Location = "20,230"; $btnTest.FlatStyle = "Flat"; $btnTest.ForeColor = "Lime"; $btnTest.BackColor = "20,40,20"
-$btnTest.Add_Click({ [System.Windows.Forms.MessageBox]::Show("¡El script puede enviar mensajes! Si esto sale, el problema es el juego.") })
-$f.Controls.Add($btnTest)
+$inp = New-Object System.Windows.Forms.TextBox
+$inp.Text = "16"; $inp.BackColor = "20,20,20"; $inp.ForeColor = "Cyan"; $inp.BorderStyle = "FixedSingle"; $inp.Size = "60,25"; $inp.Location = "25,90"; $inp.TextAlign = "Center"; $f.Controls.Add($inp)
 
 $status = New-Object System.Windows.Forms.Label
-$status.Text = "MODO: MANTENER PRESIONADO"; $status.ForeColor = "Gray"; $status.Location = "20,285"; $status.AutoSize=$true; $f.Controls.Add($status)
+$status.Text = "ESTADO: ESPERANDO CLIC"; $status.ForeColor = "DimGray"; $status.Font = "Segoe UI,8"; $status.Location = "25,140"; $status.Size = "270,20"; $f.Controls.Add($status)
 
 $btnSD = New-Object System.Windows.Forms.Button
-$btnSD.Text = "SELF DESTRUCT"; $btnSD.BackColor = "60,10,10"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "20,320"; $btnSD.Size = "320,35"
+$btnSD.Text = "SELF DESTRUCT"; $btnSD.BackColor = "80,20,20"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "25,180"; $btnSD.Size = "270,35"
 $btnSD.Add_Click({ $f.Close() }); $f.Controls.Add($btnSD)
 
-# --- LÓGICA DE ALTA VELOCIDAD ---
-$lLast = 0; $rLast = 0
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
-
+# --- LÓGICA CORE (SÓLO IZQUIERDO Y POR PRESIÓN) ---
 $timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 1
 $timer.Add_Tick({
-    $now = $sw.ElapsedMilliseconds
+    $now = $script:sw.ElapsedMilliseconds
     
-    # IZQUIERDO: GetAsyncKeyState(1)
-    if ([API]::GetAsyncKeyState(1) -lt 0) {
-        $cpsL = 14; [double]::TryParse($L_CPS.Text, [ref]$cpsL)
-        if ($now - $lLast -ge (1000/$cpsL)) {
+    # Comprobar si el botón IZQUIERDO (1) está presionado físicamente
+    if ([API]::GetAsyncKeyState(1) -band 0x8000) {
+        
+        # Validar CPS
+        $currentCps = 16
+        if (![double]::TryParse($inp.Text, [ref]$currentCps)) { $currentCps = 16 }
+        if ($currentCps -le 0) { $currentCps = 1 }
+
+        # Si ha pasado el tiempo necesario, hacer click
+        if ($now - $script:lLast -ge (1000 / $currentCps)) {
+            # Simulamos el click (Down y Up)
             [API]::mouse_event(0x0002, 0, 0, 0, 0)
             [API]::mouse_event(0x0004, 0, 0, 0, 0)
-            $lLast = $now
+            $script:lLast = $now
+            $status.Text = "ESTADO: CLICKING ($currentCps CPS)"
+            $status.ForeColor = "Cyan"
         }
-    }
-
-    # DERECHO: GetAsyncKeyState(2)
-    if ([API]::GetAsyncKeyState(2) -lt 0) {
-        $cpsR = 20; [double]::TryParse($R_CPS.Text, [ref]$cpsR)
-        if ($now - $rLast -ge (1000/$cpsR)) {
-            [API]::mouse_event(0x0008, 0, 0, 0, 0)
-            [API]::mouse_event(0x0010, 0, 0, 0, 0)
-            $rLast = $now
-        }
+    } else {
+        $status.Text = "ESTADO: ESPERANDO CLIC"
+        $status.ForeColor = "DimGray"
     }
 })
 
