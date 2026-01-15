@@ -1,48 +1,89 @@
-Add-Type -TypeDefinition @"
+# --- CONFIGURACIÓN DE ENTRADA ---
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$api = @"
 using System;
 using System.Runtime.InteropServices;
-public class Mouse {
+public class API {
     [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
     [DllImport("user32.dll")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
+    [DllImport("user32.dll")] public static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
 }
 "@
+Add-Type -TypeDefinition $api
 
-Write-Host "--- HERA CLICKER: MODO BUCLE ---" -ForegroundColor Cyan
-Write-Host "1. Abre Minecraft (asegúrate que NO esté en pantalla completa total)."
-Write-Host "2. Mantén presionado Clic Izquierdo para Combat o Derecho para Bridge."
-Write-Host "3. Para cerrar, cierra esta ventana de PowerShell."
+# --- INTERFAZ ESTILO PANEL ---
+$f = New-Object System.Windows.Forms.Form
+$f.Text = "HeraMC Panel"; $f.Size = "360,380"; $f.BackColor = [System.Drawing.Color]::FromArgb(15,15,15)
+$f.FormBorderStyle = 'None'; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
+$f.Add_MouseDown({ [API]::ReleaseCapture(); [API]::SendMessage($f.Handle, 0xA1, 0x2, 0) })
 
-$L_CPS = 16  # Ajusta aquí los CPS de Combate
-$R_CPS = 22  # Ajusta aquí los CPS de Bridge
+# Título
+$title = New-Object System.Windows.Forms.Label
+$title.Text = "HERA MC | CLICKER PANEL"; $title.ForeColor = "Cyan"; $title.Font = "Segoe UI,13,Bold"; $title.Location = "20,15"; $title.AutoSize=$true; $f.Controls.Add($title)
 
-$lDelay = 1000 / $L_CPS
-$rDelay = 1000 / $R_CPS
+# Botón Cerrar
+$close = New-Object System.Windows.Forms.Label
+$close.Text = "×"; $close.Font = "Arial,22,Bold"; $close.ForeColor = "DimGray"; $close.Location = "320,10"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
 
-$lLast = 0
-$rLast = 0
+function CrearFila($txt, $y, $def) {
+    $p = New-Object System.Windows.Forms.Panel
+    $p.Size = "320,70"; $p.Location = "20,$y"; $p.BackColor = [System.Drawing.Color]::FromArgb(25,25,25)
+    
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $txt; $l.ForeColor = "White"; $l.Location = "10,10"; $l.AutoSize=$true; $p.Controls.Add($l)
+    
+    $i = New-Object System.Windows.Forms.TextBox
+    $i.Text = $def; $i.Location = "10,35"; $i.Size = "60,25"; $i.BackColor = "10,10,10"; $i.ForeColor = "Cyan"; $i.BorderStyle = "FixedSingle"; $p.Controls.Add($i)
+    
+    $f.Controls.Add($p)
+    return $i
+}
+
+$L_CPS = CrearFila "COMBAT CPS (Mantener LMB)" 60 "14"
+$R_CPS = CrearFila "BRIDGE CPS (Mantener RMB)" 140 "20"
+
+# Botón de Prueba
+$btnTest = New-Object System.Windows.Forms.Button
+$btnTest.Text = "PROBAR CLICK (Haz clic aquí)"; $btnTest.Size = "320,40"; $btnTest.Location = "20,230"; $btnTest.FlatStyle = "Flat"; $btnTest.ForeColor = "Lime"; $btnTest.BackColor = "20,40,20"
+$btnTest.Add_Click({ [System.Windows.Forms.MessageBox]::Show("¡El script puede enviar mensajes! Si esto sale, el problema es el juego.") })
+$f.Controls.Add($btnTest)
+
+$status = New-Object System.Windows.Forms.Label
+$status.Text = "MODO: MANTENER PRESIONADO"; $status.ForeColor = "Gray"; $status.Location = "20,285"; $status.AutoSize=$true; $f.Controls.Add($status)
+
+$btnSD = New-Object System.Windows.Forms.Button
+$btnSD.Text = "SELF DESTRUCT"; $btnSD.BackColor = "60,10,10"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "20,320"; $btnSD.Size = "320,35"
+$btnSD.Add_Click({ $f.Close() }); $f.Controls.Add($btnSD)
+
+# --- LÓGICA DE ALTA VELOCIDAD ---
+$lLast = 0; $rLast = 0
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
-while($true) {
+$timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 1
+$timer.Add_Tick({
     $now = $sw.ElapsedMilliseconds
-
-    # DETECTAR CLIC IZQUIERDO FÍSICO
-    if ([Mouse]::GetAsyncKeyState(1) -band 0x8000) {
-        if ($now - $lLast -ge $lDelay) {
-            [Mouse]::mouse_event(0x0002, 0, 0, 0, 0) # Presionar
-            [Mouse]::mouse_event(0x0004, 0, 0, 0, 0) # Soltar
+    
+    # IZQUIERDO: GetAsyncKeyState(1)
+    if ([API]::GetAsyncKeyState(1) -lt 0) {
+        $cpsL = 14; [double]::TryParse($L_CPS.Text, [ref]$cpsL)
+        if ($now - $lLast -ge (1000/$cpsL)) {
+            [API]::mouse_event(0x0002, 0, 0, 0, 0)
+            [API]::mouse_event(0x0004, 0, 0, 0, 0)
             $lLast = $now
         }
     }
 
-    # DETECTAR CLIC DERECHO FÍSICO
-    if ([Mouse]::GetAsyncKeyState(2) -band 0x8000) {
-        if ($now - $rLast -ge $rDelay) {
-            [Mouse]::mouse_event(0x0008, 0, 0, 0, 0) # Presionar
-            [Mouse]::mouse_event(0x0010, 0, 0, 0, 0) # Soltar
+    # DERECHO: GetAsyncKeyState(2)
+    if ([API]::GetAsyncKeyState(2) -lt 0) {
+        $cpsR = 20; [double]::TryParse($R_CPS.Text, [ref]$cpsR)
+        if ($now - $rLast -ge (1000/$cpsR)) {
+            [API]::mouse_event(0x0008, 0, 0, 0, 0)
+            [API]::mouse_event(0x0010, 0, 0, 0, 0)
             $rLast = $now
         }
     }
-    
-    # Pausa mínima para no quemar el procesador (1ms)
-    Start-Sleep -Milliseconds 1
-}
+})
+
+$timer.Start()
+[System.Windows.Forms.Application]::Run($f)
