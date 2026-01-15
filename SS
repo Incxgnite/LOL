@@ -1,0 +1,159 @@
+# --- CONFIGURACIÓN ---
+try { Set-PSReadLineOption -HistorySaveStyle SaveNothing -ErrorAction SilentlyContinue } catch {}
+if ($host.Runspace.ApartmentState -ne "STA") {
+    powershell -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCommandPath
+    exit
+}
+
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$api = @"
+using System;
+using System.Runtime.InteropServices;
+public class API {
+    [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
+    [DllImport("user32.dll")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
+    [DllImport("user32.dll")] public static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+"@
+Add-Type -TypeDefinition $api
+[API]::ShowWindow([API]::GetConsoleWindow(), 0)
+
+# --- VARIABLES ---
+$script:LeftBind = 0; $script:RightBind = 0
+$script:LeftCPS = 18; $script:RightCPS = 30
+$script:lDelay = 1000/18; $script:rDelay = 1000/30
+$script:lLast = 0; $script:rLast = 0
+$script:JitterEnabled = $false
+$script:sw = [System.Diagnostics.Stopwatch]::StartNew()
+$script:rand = New-Object System.Random
+
+# NUEVAS VARIABLES DE ESTADO
+$script:LActive = $false
+$script:RActive = $false
+
+function IsDown($k) { return ($k -ne 0 -and ([API]::GetAsyncKeyState($k) -band 0x8000)) }
+function GetName($k) {
+    $n = @{0="NONE"; 1="LMB"; 2="RMB"; 4="MMB"; 9="TAB"; 16="SHIFT"; 121="F10"}
+    65..90|%{$n[$_]=[char]$_}; return if($n[$k]){$n[$k]}else{"K$k"}
+}
+
+# --- INTERFAZ ---
+$f = New-Object System.Windows.Forms.Form
+$f.Text = "Icon1CClicker V6"; $f.Size = "360,400"; $f.BackColor = "10,10,10"
+$f.FormBorderStyle = 'None'; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
+$f.Add_MouseDown({ [API]::ReleaseCapture(); [API]::SendMessage($f.Handle, 0xA1, 0x2, 0) })
+
+$title = New-Object System.Windows.Forms.Label
+$title.Text = "Icon1CClicker | AUTO-STOP MODE"; $title.ForeColor = "Cyan"; $title.Font = "Segoe UI,12,Bold"; $title.Location = "15,12"; $title.AutoSize=$true; $f.Controls.Add($title)
+
+$close = New-Object System.Windows.Forms.Label
+$close.Text = "×"; $close.Font = "Arial,20,Bold"; $close.ForeColor = "Gray"; $close.Location = "325,8"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
+
+function AddRow($txt, $y, $maxCps, $defCps) {
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $txt; $l.ForeColor = "White"; $l.Location = "25,$y"; $l.AutoSize=$true; $f.Controls.Add($l)
+    
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Text = "NONE"; $btn.BackColor = "30,30,30"; $btn.ForeColor = "White"; $btn.FlatStyle = "Flat"; $btn.Size = "85,25"; $btn.Location = "25,$($y+22)"; $f.Controls.Add($btn)
+    
+    $inp = New-Object System.Windows.Forms.TextBox
+    $inp.Text = "$defCps"; $inp.BackColor = "20,20,20"; $inp.ForeColor = "Cyan"; $inp.BorderStyle = "FixedSingle"; $inp.Size = "45,25"; $inp.Location = "120,$($y+22)"; $inp.TextAlign = "Center"; $f.Controls.Add($inp)
+    
+    $lCps = New-Object System.Windows.Forms.Label
+    $lCps.Text = "CPS (Max $maxCps)"; $lCps.ForeColor = "DimGray"; $lCps.Location = "175,$($y+25)"; $lCps.AutoSize=$true; $f.Controls.Add($lCps)
+    return @($btn, $inp, $maxCps)
+}
+
+$LUI = AddRow "COMBAT (Left Click)" 60 18 18
+$RUI = AddRow "BRIDGE (Right Click)" 130 30 30
+
+$btnJitter = New-Object System.Windows.Forms.Button
+$btnJitter.Text = "JITTER (Ataque): OFF"; $btnJitter.BackColor = "30,30,30"; $btnJitter.ForeColor = "White"; $btnJitter.FlatStyle = "Flat"; $btnJitter.Location = "25,210"; $btnJitter.Size = "310,30"
+$btnJitter.Add_Click({
+    $script:JitterEnabled = -not $script:JitterEnabled
+    if($script:JitterEnabled){ $btnJitter.Text="JITTER (Ataque): ON"; $btnJitter.BackColor="0,80,80" }
+    else{ $btnJitter.Text="JITTER (Ataque): OFF"; $btnJitter.BackColor="30,30,30" }
+})
+$f.Controls.Add($btnJitter)
+
+$info = New-Object System.Windows.Forms.Label
+$info.Text = "Modo: Presiona Tecla para iniciar, Click Mouse para parar."; $info.ForeColor = "Gray"; $info.Font = "Segoe UI,8"; $info.Location = "25,250"; $info.Size = "310,40"; $f.Controls.Add($info)
+
+$btnSD = New-Object System.Windows.Forms.Button
+$btnSD.Text = "SELF DESTRUCT"; $btnSD.BackColor = "100,20,20"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "25,320"; $btnSD.Size = "310,40"
+$btnSD.Add_Click({ $f.Close() }); $f.Controls.Add($btnSD)
+
+# --- LÓGICA MODIFICADA ---
+function SyncCPS {
+    $lVal = 18; $rVal = 30
+    if([int]::TryParse($LUI[1].Text, [ref]$lVal)){ $script:LeftCPS = [Math]::Clamp($lVal, 1, 18) }
+    if([int]::TryParse($RUI[1].Text, [ref]$rVal)){ $script:RightCPS = [Math]::Clamp($rVal, 1, 30) }
+    $script:lDelay = 1000 / $script:LeftCPS
+    $script:rDelay = 1000 / $script:RightCPS
+}
+
+$timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 1
+$timer.Add_Tick({
+    $now = $script:sw.ElapsedMilliseconds
+    SyncCPS
+
+    # Lógica de asignación de teclas (Binds)
+    if($script:lisL -or $script:lisR){
+        for($i=1; $i -le 165; $i++){
+            if(IsDown $i){
+                if($script:lisL){ $script:LeftBind=$i; $LUI[0].Text=GetName $i; $script:lisL=$false }
+                else{ $script:RightBind=$i; $RUI[0].Text=GetName $i; $script:lisR=$false }
+                [System.Threading.Thread]::Sleep(300)
+                break
+            }
+        }
+        return
+    }
+
+    # --- LÓGICA LEFT CLICK ---
+    if($script:LeftBind -ne 0){
+        # Si presionas la tecla asignada, se activa
+        if(IsDown $script:LeftBind){ $script:LActive = $true }
+        
+        # Si haces click izquierdo manual (LMB = 1), se desactiva
+        # Añadimos un pequeño margen de tiempo para que no se apague con su propio click artificial
+        if((IsDown 1) -and ($now - $script:lLast > ($script:lDelay + 10))){ 
+            $script:LActive = $false 
+        }
+
+        if($script:LActive){
+            if(($now - $script:lLast) -ge ($script:lDelay + $script:rand.Next(-1, 2))){
+                if($script:JitterEnabled){ [API]::mouse_event(0x0001, $script:rand.Next(-2, 3), $script:rand.Next(-2, 3), 0, 0) }
+                [API]::mouse_event(0x0002, 0, 0, 0, 0); [API]::mouse_event(0x0004, 0, 0, 0, 0)
+                $script:lLast = $now
+            }
+        }
+    }
+
+    # --- LÓGICA RIGHT CLICK ---
+    if($script:RightBind -ne 0){
+        # Si presionas la tecla asignada, se activa
+        if(IsDown $script:RightBind){ $script:RActive = $true }
+        
+        # Si haces click derecho manual (RMB = 2), se desactiva
+        if((IsDown 2) -and ($now - $script:rLast > ($script:rDelay + 10))){ 
+            $script:RActive = $false 
+        }
+
+        if($script:RActive){
+            if(($now - $script:rLast) -ge ($script:rDelay)){
+                [API]::mouse_event(0x0008, 0, 0, 0, 0); [API]::mouse_event(0x0010, 0, 0, 0, 0)
+                $script:rLast = $now
+            }
+        }
+    }
+})
+
+$LUI[0].Add_Click({ $LUI[0].Text="..."; $script:lisL=$true })
+$RUI[0].Add_Click({ $RUI[0].Text="..."; $script:lisR=$true })
+
+$timer.Start()
+[System.Windows.Forms.Application]::Run($f)
