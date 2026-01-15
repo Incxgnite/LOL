@@ -22,134 +22,72 @@ Add-Type -TypeDefinition $api
 [API]::ShowWindow([API]::GetConsoleWindow(), 0)
 
 # --- VARIABLES ---
-$script:LeftBind = 0; $script:RightBind = 0
-$script:LeftCPS = 18; $script:RightCPS = 30
-$script:lDelay = 1000/18; $script:rDelay = 1000/30
 $script:lLast = 0; $script:rLast = 0
 $script:sw = [System.Diagnostics.Stopwatch]::StartNew()
 
-# Estados de activación (Toggle)
-$script:LActive = $false
-$script:RActive = $false
-
-# Banderas para ignorar clicks artificiales
-$script:IgnoreL = $false
-$script:IgnoreR = $false
-
 function IsDown($k) { return ($k -ne 0 -and ([API]::GetAsyncKeyState($k) -band 0x8000)) }
-function GetName($k) {
-    $n = @{0="NONE"; 1="LMB"; 2="RMB"; 4="MMB"; 9="TAB"; 16="SHIFT"; 121="F10"}
-    65..90|%{$n[$_]=[char]$_}; return if($n[$k]){$n[$k]}else{"K$k"}
-}
 
 # --- INTERFAZ ---
 $f = New-Object System.Windows.Forms.Form
-$f.Text = "Icon1CClicker V8"; $f.Size = "360,350"; $f.BackColor = "10,10,10"
+$f.Text = "HeraMC Hold Clicker"; $f.Size = "360,320"; $f.BackColor = "10,10,10"
 $f.FormBorderStyle = 'None'; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
 $f.Add_MouseDown({ [API]::ReleaseCapture(); [API]::SendMessage($f.Handle, 0xA1, 0x2, 0) })
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text = "Icon1CClicker | ONE-TAP STOP"; $title.ForeColor = "Cyan"; $title.Font = "Segoe UI,12,Bold"; $title.Location = "15,12"; $title.AutoSize=$true; $f.Controls.Add($title)
+$title.Text = "HeraMC | HOLD MODE"; $title.ForeColor = "Cyan"; $title.Font = "Segoe UI,12,Bold"; $title.Location = "15,12"; $title.AutoSize=$true; $f.Controls.Add($title)
 
 $close = New-Object System.Windows.Forms.Label
 $close.Text = "×"; $close.Font = "Arial,20,Bold"; $close.ForeColor = "Gray"; $close.Location = "325,8"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
 
-function AddRow($txt, $y, $maxCps, $defCps) {
+function AddRow($txt, $y, $defCps) {
     $l = New-Object System.Windows.Forms.Label
     $l.Text = $txt; $l.ForeColor = "White"; $l.Location = "25,$y"; $l.AutoSize=$true; $f.Controls.Add($l)
-    $btn = New-Object System.Windows.Forms.Button
-    $btn.Text = "NONE"; $btn.BackColor = "30,30,30"; $btn.ForeColor = "White"; $btn.FlatStyle = "Flat"; $btn.Size = "85,25"; $btn.Location = "25,$($y+22)"; $f.Controls.Add($btn)
+    
     $inp = New-Object System.Windows.Forms.TextBox
-    $inp.Text = "$defCps"; $inp.BackColor = "20,20,20"; $inp.ForeColor = "Cyan"; $inp.BorderStyle = "FixedSingle"; $inp.Size = "45,25"; $inp.Location = "120,$($y+22)"; $inp.TextAlign = "Center"; $f.Controls.Add($inp)
-    return @($btn, $inp)
+    $inp.Text = "$defCps"; $inp.BackColor = "20,20,20"; $inp.ForeColor = "Cyan"; $inp.BorderStyle = "FixedSingle"; $inp.Size = "60,25"; $inp.Location = "25,$($y+22)"; $inp.TextAlign = "Center"; $f.Controls.Add($inp)
+    
+    $info = New-Object System.Windows.Forms.Label
+    $info.Text = "CPS (Mantén presionado el botón)"; $info.ForeColor = "Gray"; $info.Font = "Segoe UI,7"; $info.Location = "95,$($y+27)"; $info.AutoSize=$true; $f.Controls.Add($info)
+    return $inp
 }
 
-$LUI = AddRow "COMBAT (Left Click)" 60 18 18
-$RUI = AddRow "BRIDGE (Right Click)" 130 30 30
+$L_CPS = AddRow "COMBAT (Left Click)" 60 18
+$R_CPS = AddRow "BRIDGE (Right Click)" 130 25
 
 $status = New-Object System.Windows.Forms.Label
-$status.Text = "ESTADO: ESPERANDO TECLA"; $status.ForeColor = "DimGray"; $status.Font = "Segoe UI,9,Italic"; $status.Location = "25,200"; $status.Size = "310,20"; $f.Controls.Add($status)
+$status.Text = "MODO: HOLD (Mantener presionado)"; $status.ForeColor = "DimGray"; $status.Font = "Segoe UI,9,Italic"; $status.Location = "25,200"; $status.Size = "310,20"; $f.Controls.Add($status)
 
 $btnSD = New-Object System.Windows.Forms.Button
-$btnSD.Text = "SELF DESTRUCT"; $btnSD.BackColor = "100,20,20"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "25,260"; $btnSD.Size = "310,40"
+$btnSD.Text = "CERRAR Y LIMPIAR"; $btnSD.BackColor = "40,40,40"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "25,240"; $btnSD.Size = "310,40"
 $btnSD.Add_Click({ $f.Close() }); $f.Controls.Add($btnSD)
 
-# --- LÓGICA CORE ---
+# --- LÓGICA CORE (HOLD MODE) ---
 $timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 1
 $timer.Add_Tick({
     $now = $script:sw.ElapsedMilliseconds
     
-    # 1. ASIGNACIÓN DE TECLAS
-    if($script:lisL -or $script:lisR){
-        for($i=1; $i -le 165; $i++){
-            if(IsDown $i){
-                if($script:lisL){ $script:LeftBind=$i; $LUI[0].Text=GetName $i; $script:lisL=$false }
-                else{ $script:RightBind=$i; $RUI[0].Text=GetName $i; $script:lisR=$false }
-                [System.Threading.Thread]::Sleep(300); break
-            }
+    # LÓGICA CLIC IZQUIERDO (VKey 1)
+    if(IsDown 1) {
+        $lDelay = 1000 / [double]$L_CPS.Text
+        if($now - $script:lLast -ge $lDelay){
+            # Enviamos clic (Bajar y Subir)
+            [API]::mouse_event(0x0002, 0, 0, 0, 0)
+            [API]::mouse_event(0x0004, 0, 0, 0, 0)
+            $script:lLast = $now
         }
-        return
     }
 
-    # --- LÓGICA CLICK IZQUIERDO ---
-    if($script:LeftBind -ne 0){
-        # ACTIVAR con tecla
-        if(IsDown $script:LeftBind){ 
-            $script:LActive = $true 
-            $status.Text = "ESTADO: AUTO-LEFT ACTIVO"
+    # LÓGICA CLIC DERECHO (VKey 2)
+    if(IsDown 2) {
+        $rDelay = 1000 / [double]$R_CPS.Text
+        if($now - $script:rLast -ge $rDelay){
+            # Enviamos clic derecho (Bajar y Subir)
+            [API]::mouse_event(0x0008, 0, 0, 0, 0)
+            [API]::mouse_event(0x0010, 0, 0, 0, 0)
+            $script:rLast = $now
         }
-        
-        # DETECTAR CLICK FÍSICO (Para apagar)
-        # Si el botón está abajo pero el programa NO acaba de mandar un click...
-        if($script:LActive -and (IsDown 1)){
-            if(-not $script:IgnoreL){
-                $script:LActive = $false
-                $status.Text = "ESTADO: DETENIDO POR USUARIO"
-            }
-        }
-
-        if($script:LActive){
-            if($now - $script:lLast -ge (1000 / $LUI[1].Text)){
-                $script:IgnoreL = $true # Bloqueamos detección de parada un instante
-                [API]::mouse_event(0x0002, 0, 0, 0, 0)
-                [API]::mouse_event(0x0004, 0, 0, 0, 0)
-                $script:lLast = $now
-                # Pequeño retardo para soltar la bandera de ignición
-            }
-        }
-        if($now - $script:lLast -gt 15){ $script:IgnoreL = $false }
-    }
-
-    # --- LÓGICA CLICK DERECHO ---
-    if($script:RightBind -ne 0){
-        # ACTIVAR con tecla
-        if(IsDown $script:RightBind){ 
-            $script:RActive = $true 
-            $status.Text = "ESTADO: AUTO-RIGHT ACTIVO"
-        }
-        
-        # DETECTAR CLICK FÍSICO (Para apagar)
-        if($script:RActive -and (IsDown 2)){
-            if(-not $script:IgnoreR){
-                $script:RActive = $false
-                $status.Text = "ESTADO: DETENIDO POR USUARIO"
-            }
-        }
-
-        if($script:RActive){
-            if($now - $script:rLast -ge (1000 / $RUI[1].Text)){
-                $script:IgnoreR = $true
-                [API]::mouse_event(0x0008, 0, 0, 0, 0)
-                [API]::mouse_event(0x0010, 0, 0, 0, 0)
-                $script:rLast = $now
-            }
-        }
-        if($now - $script:rLast -gt 15){ $script:IgnoreR = $false }
     }
 })
-
-$LUI[0].Add_Click({ $LUI[0].Text="..."; $script:lisL=$true })
-$RUI[0].Add_Click({ $RUI[0].Text="..."; $script:lisR=$true })
 
 $timer.Start()
 [System.Windows.Forms.Application]::Run($f)
