@@ -1,4 +1,4 @@
-# --- CONFIGURACIÓN ---
+# --- CONFIGURACIÓN OgKushh Vip ---
 try { Set-PSReadLineOption -HistorySaveStyle SaveNothing -ErrorAction SilentlyContinue } catch {}
 if ($host.Runspace.ApartmentState -ne "STA") {
     powershell -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCommandPath
@@ -14,65 +14,120 @@ public class API {
     [DllImport("user32.dll")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
     [DllImport("user32.dll")] public static extern bool ReleaseCapture();
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+    [DllImport("user32.dll")] public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
 }
 "@
 Add-Type -TypeDefinition $api
 
 # --- VARIABLES ---
+$script:LeftBind = 0
+$script:LActive = $false
+$script:IgnoreL = $false
 $script:lLast = 0
 $script:sw = [System.Diagnostics.Stopwatch]::StartNew()
+$script:lisL = $false
+
+function IsDown($k) { return ($k -ne 0 -and ([API]::GetAsyncKeyState($k) -band 0x8000)) }
+function GetName($k) {
+    $n = @{0="NONE"; 1="LMB"; 2="RMB"; 4="MMB"; 16="SHIFT"; 17="CTRL"; 18="ALT"}
+    65..90|%{$n[$_]=[char]$_}; return if($n[$k]){$n[$k]}else{"K$k"}
+}
 
 # --- INTERFAZ ---
 $f = New-Object System.Windows.Forms.Form
-$f.Text = "HeraMC | Only Left"; $f.Size = "320,240"; $f.BackColor = "10,10,10"
+$f.Text = "OgKushh Vip"; $f.Size = "360,300"; $f.BackColor = "10,10,10"
 $f.FormBorderStyle = 'None'; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
 $f.Add_MouseDown({ [API]::ReleaseCapture(); [API]::SendMessage($f.Handle, 0xA1, 0x2, 0) })
 
+# ACTIVAR PROTECCIÓN ANTI-CAPTURA (Invisible en Stream)
+# 0x00000011 = WDA_EXCLUDEFROMCAPTURE
+[API]::SetWindowDisplayAffinity($f.Handle, 0x11)
+
 $title = New-Object System.Windows.Forms.Label
-$title.Text = "HERA CLICKER V9"; $title.ForeColor = "Cyan"; $title.Font = "Segoe UI,12,Bold"; $title.Location = "20,15"; $title.AutoSize=$true; $f.Controls.Add($title)
+$title.Text = "OgKushh Vip | STEALTH MODE"; $title.ForeColor = "Cyan"; $title.Font = "Segoe UI,13,Bold"; $title.Location = "20,15"; $title.AutoSize=$true; $f.Controls.Add($title)
 
 $close = New-Object System.Windows.Forms.Label
-$close.Text = "×"; $close.Font = "Arial,20,Bold"; $close.ForeColor = "Gray"; $close.Location = "285,10"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
+$close.Text = "×"; $close.Font = "Arial,22,Bold"; $close.ForeColor = "Gray"; $close.Location = "320,10"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
 
-# Fila Única: Click Izquierdo
-$label = New-Object System.Windows.Forms.Label
-$label.Text = "COMBAT CPS (Mantén presionado)"; $label.ForeColor = "White"; $label.Location = "25,65"; $label.AutoSize=$true; $f.Controls.Add($label)
+# Fila: Asignación de Tecla
+$lKey = New-Object System.Windows.Forms.Label
+$lKey.Text = "TECLA DE ACTIVACIÓN:"; $lKey.ForeColor = "White"; $lKey.Location = "30,70"; $lKey.AutoSize=$true; $f.Controls.Add($lKey)
+
+$btnBind = New-Object System.Windows.Forms.Button
+$btnBind.Text = "ASIGNAR"; $btnBind.BackColor = "30,30,30"; $btnBind.ForeColor = "Cyan"; $btnBind.FlatStyle = "Flat"; $btnBind.Location = "30,95"; $btnBind.Size = "100,30"
+$btnBind.Add_Click({ $btnBind.Text="..."; $script:lisL=$true })
+$f.Controls.Add($btnBind)
+
+# Fila: CPS
+$lCps = New-Object System.Windows.Forms.Label
+$lCps.Text = "CPS:"; $lCps.ForeColor = "White"; $lCps.Location = "160,70"; $lCps.AutoSize=$true; $f.Controls.Add($lCps)
 
 $inp = New-Object System.Windows.Forms.TextBox
-$inp.Text = "16"; $inp.BackColor = "20,20,20"; $inp.ForeColor = "Cyan"; $inp.BorderStyle = "FixedSingle"; $inp.Size = "60,25"; $inp.Location = "25,90"; $inp.TextAlign = "Center"; $f.Controls.Add($inp)
+$inp.Text = "16"; $inp.BackColor = "20,20,20"; $inp.ForeColor = "Cyan"; $inp.BorderStyle = "FixedSingle"; $inp.Size = "60,30"; $inp.Location = "160,95"; $inp.TextAlign = "Center"; $f.Controls.Add($inp)
 
 $status = New-Object System.Windows.Forms.Label
-$status.Text = "ESTADO: ESPERANDO CLIC"; $status.ForeColor = "DimGray"; $status.Font = "Segoe UI,8"; $status.Location = "25,140"; $status.Size = "270,20"; $f.Controls.Add($status)
+$status.Text = "ESTADO: ESPERANDO CONFIGURACIÓN"; $status.ForeColor = "DimGray"; $status.Font = "Segoe UI,9,Italic"; $status.Location = "30,160"; $status.Size = "300,20"; $f.Controls.Add($status)
 
 $btnSD = New-Object System.Windows.Forms.Button
-$btnSD.Text = "SELF DESTRUCT"; $btnSD.BackColor = "80,20,20"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "25,180"; $btnSD.Size = "270,35"
+$btnSD.Text = "SELF DESTRUCT"; $btnSD.BackColor = "80,20,20"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "30,220"; $btnSD.Size = "300,40"
 $btnSD.Add_Click({ $f.Close() }); $f.Controls.Add($btnSD)
 
-# --- LÓGICA CORE (SÓLO IZQUIERDO Y POR PRESIÓN) ---
+# --- LÓGICA CORE ---
 $timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 1
 $timer.Add_Tick({
     $now = $script:sw.ElapsedMilliseconds
     
-    # Comprobar si el botón IZQUIERDO (1) está presionado físicamente
-    if ([API]::GetAsyncKeyState(1) -band 0x8000) {
-        
-        # Validar CPS
-        $currentCps = 16
-        if (![double]::TryParse($inp.Text, [ref]$currentCps)) { $currentCps = 16 }
-        if ($currentCps -le 0) { $currentCps = 1 }
-
-        # Si ha pasado el tiempo necesario, hacer click
-        if ($now - $script:lLast -ge (1000 / $currentCps)) {
-            # Simulamos el click (Down y Up)
-            [API]::mouse_event(0x0002, 0, 0, 0, 0)
-            [API]::mouse_event(0x0004, 0, 0, 0, 0)
-            $script:lLast = $now
-            $status.Text = "ESTADO: CLICKING ($currentCps CPS)"
-            $status.ForeColor = "Cyan"
+    # ASIGNACIÓN DE TECLA
+    if($script:lisL){
+        for($i=1; $i -le 165; $i++){
+            if(IsDown $i){
+                $script:LeftBind = $i
+                $btnBind.Text = GetName $i
+                $script:lisL = $false
+                [System.Threading.Thread]::Sleep(300)
+                break
+            }
         }
-    } else {
-        $status.Text = "ESTADO: ESPERANDO CLIC"
-        $status.ForeColor = "DimGray"
+        return
+    }
+
+    # LÓGICA DE ACTIVACIÓN / DESACTIVACIÓN
+    if($script:LeftBind -ne 0){
+        # Si presionas la TECLA -> ACTIVA
+        if(IsDown $script:LeftBind){
+            if(-not $script:LActive){
+                $script:LActive = $true
+                $status.Text = "ESTADO: [ACTIVO] PRESIONA CLIC PARA PARAR"
+                $status.ForeColor = "Cyan"
+                [System.Threading.Thread]::Sleep(200) # Evitar rebote
+            }
+        }
+
+        # Si el Autoclicker está ACTIVO y tú presionas CLIC IZQUIERDO físico -> DESACTIVA
+        if($script:LActive -and (IsDown 1)){
+            if(-not $script:IgnoreL){
+                $script:LActive = $false
+                $status.Text = "ESTADO: [DETENIDO] POR CLIC MANUAL"
+                $status.ForeColor = "Red"
+            }
+        }
+
+        # PROCESO DE CLICEO
+        if($script:LActive){
+            $cps = 16
+            if(![double]::TryParse($inp.Text, [ref]$cps)){ $cps = 16 }
+            if($cps -lt 1){ $cps = 1 }
+
+            if($now - $script:lLast -ge (1000 / $cps)){
+                $script:IgnoreL = $true # Ignoramos el clic que nosotros mismos mandamos
+                [API]::mouse_event(0x0002, 0, 0, 0, 0) # Down
+                [API]::mouse_event(0x0004, 0, 0, 0, 0) # Up
+                $script:lLast = $now
+            }
+        }
+        
+        # Reset de bandera de ignorar clics artificiales
+        if($now - $script:lLast -gt 10){ $script:IgnoreL = $false }
     }
 })
 
