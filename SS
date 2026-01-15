@@ -1,10 +1,4 @@
-# --- CONFIGURACIÓN ---
-try { Set-PSReadLineOption -HistorySaveStyle SaveNothing -ErrorAction SilentlyContinue } catch {}
-if ($host.Runspace.ApartmentState -ne "STA") {
-    powershell -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File $PSCommandPath
-    exit
-}
-
+# --- CONFIGURACIÓN DE PRIVILEGIOS ---
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $api = @"
 using System;
@@ -14,80 +8,66 @@ public class API {
     [DllImport("user32.dll")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
     [DllImport("user32.dll")] public static extern bool ReleaseCapture();
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
-    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 }
 "@
 Add-Type -TypeDefinition $api
-[API]::ShowWindow([API]::GetConsoleWindow(), 0)
-
-# --- VARIABLES ---
-$script:lLast = 0; $script:rLast = 0
-$script:sw = [System.Diagnostics.Stopwatch]::StartNew()
-
-function IsDown($k) { return ($k -ne 0 -and ([API]::GetAsyncKeyState($k) -band 0x8000)) }
 
 # --- INTERFAZ ---
 $f = New-Object System.Windows.Forms.Form
-$f.Text = "HeraMC Hold Clicker"; $f.Size = "360,320"; $f.BackColor = "10,10,10"
+$f.Text = "HeraMC Clicker"; $f.Size = "300,250"; $f.BackColor = "15,15,15"
 $f.FormBorderStyle = 'None'; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
 $f.Add_MouseDown({ [API]::ReleaseCapture(); [API]::SendMessage($f.Handle, 0xA1, 0x2, 0) })
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text = "HeraMC | HOLD MODE"; $title.ForeColor = "Cyan"; $title.Font = "Segoe UI,12,Bold"; $title.Location = "15,12"; $title.AutoSize=$true; $f.Controls.Add($title)
+$title.Text = "HERA CLICKER v2"; $title.ForeColor = "Cyan"; $title.Font = "Segoe UI,12,Bold"; $title.Location = "15,10"; $title.AutoSize=$true; $f.Controls.Add($title)
 
 $close = New-Object System.Windows.Forms.Label
-$close.Text = "×"; $close.Font = "Arial,20,Bold"; $close.ForeColor = "Gray"; $close.Location = "325,8"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
+$close.Text = "×"; $close.Font = "Arial,18"; $close.ForeColor = "White"; $close.Location = "270,5"; $close.Cursor = "Hand"; $close.Add_Click({ $f.Close() }); $f.Controls.Add($close)
 
-function AddRow($txt, $y, $defCps) {
+function AddUI($txt, $y, $def) {
     $l = New-Object System.Windows.Forms.Label
-    $l.Text = $txt; $l.ForeColor = "White"; $l.Location = "25,$y"; $l.AutoSize=$true; $f.Controls.Add($l)
-    
-    $inp = New-Object System.Windows.Forms.TextBox
-    $inp.Text = "$defCps"; $inp.BackColor = "20,20,20"; $inp.ForeColor = "Cyan"; $inp.BorderStyle = "FixedSingle"; $inp.Size = "60,25"; $inp.Location = "25,$($y+22)"; $inp.TextAlign = "Center"; $f.Controls.Add($inp)
-    
-    $info = New-Object System.Windows.Forms.Label
-    $info.Text = "CPS (Mantén presionado el botón)"; $info.ForeColor = "Gray"; $info.Font = "Segoe UI,7"; $info.Location = "95,$($y+27)"; $info.AutoSize=$true; $f.Controls.Add($info)
-    return $inp
+    $l.Text = $txt; $l.ForeColor = "Gray"; $l.Location = "20,$y"; $l.AutoSize=$true; $f.Controls.Add($l)
+    $i = New-Object System.Windows.Forms.TextBox
+    $i.Text = $def; $i.Location = "20,$($y+20)"; $i.Size = "50,20"; $i.BackColor = "30,30,30"; $i.ForeColor = "Cyan"; $f.Controls.Add($i)
+    return $i
 }
 
-$L_CPS = AddRow "COMBAT (Left Click)" 60 18
-$R_CPS = AddRow "BRIDGE (Right Click)" 130 25
+$L_CPS = AddUI "LEFT CLICK CPS (Combat)" 50 "14"
+$R_CPS = AddUI "RIGHT CLICK CPS (Bridge)" 110 "20"
 
 $status = New-Object System.Windows.Forms.Label
-$status.Text = "MODO: HOLD (Mantener presionado)"; $status.ForeColor = "DimGray"; $status.Font = "Segoe UI,9,Italic"; $status.Location = "25,200"; $status.Size = "310,20"; $f.Controls.Add($status)
+$status.Text = "ESTADO: ESPERANDO CLIC"; $status.ForeColor = "Yellow"; $status.Location = "20,180"; $status.AutoSize=$true; $f.Controls.Add($status)
 
-$btnSD = New-Object System.Windows.Forms.Button
-$btnSD.Text = "CERRAR Y LIMPIAR"; $btnSD.BackColor = "40,40,40"; $btnSD.ForeColor = "White"; $btnSD.FlatStyle = "Flat"; $btnSD.Location = "25,240"; $btnSD.Size = "310,40"
-$btnSD.Add_Click({ $f.Close() }); $f.Controls.Add($btnSD)
+# --- LÓGICA ---
+$script:lLast = 0; $script:rLast = 0
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
 
-# --- LÓGICA CORE (HOLD MODE) ---
 $timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 1
 $timer.Add_Tick({
-    $now = $script:sw.ElapsedMilliseconds
+    $now = $sw.ElapsedMilliseconds
     
-    # LÓGICA CLIC IZQUIERDO (VKey 1)
-    if(IsDown 1) {
-        $lDelay = 1000 / [double]$L_CPS.Text
-        if($now - $script:lLast -ge $lDelay){
-            # Enviamos clic (Bajar y Subir)
-            [API]::mouse_event(0x0002, 0, 0, 0, 0)
-            [API]::mouse_event(0x0004, 0, 0, 0, 0)
+    # IZQUIERDO (Botón 1)
+    if (([API]::GetAsyncKeyState(1) -band 0x8000)) {
+        $val = 14; [double]::TryParse($L_CPS.Text, [ref]$val)
+        if ($now - $script:lLast -ge (1000/$val)) {
+            [API]::mouse_event(0x0002, 0, 0, 0, 0) # Down
+            [API]::mouse_event(0x0004, 0, 0, 0, 0) # Up
             $script:lLast = $now
+            $status.Text = "CLICKING LEFT..."
         }
-    }
-
-    # LÓGICA CLIC DERECHO (VKey 2)
-    if(IsDown 2) {
-        $rDelay = 1000 / [double]$R_CPS.Text
-        if($now - $script:rLast -ge $rDelay){
-            # Enviamos clic derecho (Bajar y Subir)
-            [API]::mouse_event(0x0008, 0, 0, 0, 0)
-            [API]::mouse_event(0x0010, 0, 0, 0, 0)
+    } 
+    # DERECHO (Botón 2)
+    elseif (([API]::GetAsyncKeyState(2) -band 0x8000)) {
+        $val = 20; [double]::TryParse($R_CPS.Text, [ref]$val)
+        if ($now - $script:rLast -ge (1000/$val)) {
+            [API]::mouse_event(0x0008, 0, 0, 0, 0) # Down
+            [API]::mouse_event(0x0010, 0, 0, 0, 0) # Up
             $script:rLast = $now
+            $status.Text = "CLICKING RIGHT..."
         }
     }
+    else { $status.Text = "ESTADO: ESPERANDO CLIC" }
 })
 
 $timer.Start()
-[System.Windows.Forms.Application]::Run($f)
+$f.ShowDialog()
